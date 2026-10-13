@@ -1,0 +1,115 @@
+version: '3.8'
+
+services:
+  # 数据库服务
+  postgres:
+    image: postgres:13
+    container_name: iot_postgres
+    environment:
+      POSTGRES_DB: iot_system
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: YOUR_PASSWORD
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - iot_network
+
+  # MQTT代理
+  emqx:
+    image: emqx/emqx:4.4.6
+    container_name: iot_emqx
+    ports:
+      - "1883:1883"  # MQTT
+      - "8083:8083"  # WebSocket
+      - "8084:8084"  # WSS
+      - "8883:8883"  # MQTT SSL
+      - "18083:18083" # Dashboard
+    environment:
+      EMQX_LOADED_PLUGINS: "emqx_management,emqx_dashboard,emqx_retainer,emqx_rule_engine"
+    volumes:
+      - emqx_data:/opt/emqx/data
+      - emqx_log:/opt/emqx/log
+    networks:
+      - iot_network
+
+  # Redis缓存
+  redis:
+    image: redis:6-alpine
+    container_name: iot_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - iot_network
+
+  # API服务
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api-prod
+    container_name: iot_api
+    ports:
+      - "3000:3000"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: YOUR_PASSWORD
+      DB_NAME: iot_system
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MQTT_BROKER_URL: mqtt://emqx:1883
+      JWT_SECRET: your_jwt_secret_here
+      SENDGRID_API_KEY: YOUR_SECRET}
+      WECHAT_WEBHOOK_URL: ${WECHAT_WEBHOOK_URL:-}
+    depends_on:
+      - postgres
+      - redis
+      - emqx
+    networks:
+      - iot_network
+
+  # 前端服务
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: client-prod
+    container_name: iot_client
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    networks:
+      - iot_network
+
+  # InfluxDB (用于时间序列数据)
+  influxdb:
+    image: influxdb:2.4
+    container_name: iot_influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      - INFLUXDB_DB=iot_data
+      - INFLUXDB_ADMIN_USER=admin
+      - INFLUXDB_ADMIN_PASSWORD=YOUR_PASSWORD
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    networks:
+      - iot_network
+
+volumes:
+  postgres_data:
+  emqx_data:
+  emqx_log:
+  redis_data:
+  influxdb_data:
+
+networks:
+  iot_network:
+    driver: bridge
